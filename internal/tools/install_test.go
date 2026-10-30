@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -265,6 +266,89 @@ var _ = Describe("Install", func() {
 		expectInstalled(dst, second)
 		Expect(io.ReadAll(running)).To(Equal(first), "the copy open before the second install")
 		Expect(entries(binDir)).To(ConsistOf("kind"))
+	})
+})
+
+var _ = Describe("WriteExecutable", func() {
+	var dir, dst string
+
+	write := func(b []byte) func(io.Writer) error {
+		return func(w io.Writer) error {
+			_, err := w.Write(b)
+			return err
+		}
+	}
+
+	// failPartway writes part of a binary, then fails with cause.
+	failPartway := func(cause error) func(io.Writer) error {
+		return func(w io.Writer) error {
+			if _, err := w.Write([]byte("partial")); err != nil {
+				return err
+			}
+			return cause
+		}
+	}
+
+	BeforeEach(func() {
+		dir = GinkgoT().TempDir()
+		dst = filepath.Join(dir, "tool")
+	})
+
+	It("writes what fill writes to dst with mode 0755, leaving no temporary file", func() {
+		Expect(tools.WriteExecutable(dst, write([]byte("tool binary")))).To(Succeed())
+
+		expectInstalled(dst, []byte("tool binary"))
+		Expect(entries(dir)).To(ConsistOf("tool"))
+	})
+
+	It("replaces a dst held open with a new file, leaving the open one intact", func() {
+		old := []byte("old tool")
+		Expect(os.WriteFile(dst, old, 0o755)).To(Succeed())
+		held, err := os.Open(dst)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(held.Close)
+
+		Expect(tools.WriteExecutable(dst, write([]byte("new tool, longer")))).To(Succeed())
+
+		expectInstalled(dst, []byte("new tool, longer"))
+		Expect(io.ReadAll(held)).To(Equal(old), "the file held open across the write")
+		Expect(entries(dir)).To(ConsistOf("tool"))
+	})
+
+	It("lets fill read dst itself", func() {
+		bin := []byte("tool binary")
+		Expect(os.WriteFile(dst, bin, 0o644)).To(Succeed())
+
+		Expect(tools.WriteExecutable(dst, func(w io.Writer) error {
+			b, err := os.ReadFile(dst)
+			if err != nil {
+				return err
+			}
+			_, err = w.Write(b)
+			return err
+		})).To(Succeed())
+
+		expectInstalled(dst, bin)
+	})
+
+	It("leaves no partial dst and no temporary file when fill fails partway", func() {
+		cause := errors.New("archive truncated")
+
+		Expect(tools.WriteExecutable(dst, failPartway(cause))).To(MatchError(cause))
+
+		Expect(dst).NotTo(BeAnExistingFile())
+		Expect(entries(dir)).To(BeEmpty())
+	})
+
+	It("leaves an existing dst as it was, and no temporary file, when fill fails partway", func() {
+		old := []byte("old tool")
+		Expect(os.WriteFile(dst, old, 0o755)).To(Succeed())
+		cause := errors.New("archive truncated")
+
+		Expect(tools.WriteExecutable(dst, failPartway(cause))).To(MatchError(cause))
+
+		expectInstalled(dst, old)
+		Expect(entries(dir)).To(ConsistOf("tool"))
 	})
 })
 

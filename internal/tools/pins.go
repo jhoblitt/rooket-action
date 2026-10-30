@@ -1,5 +1,9 @@
-// Package tools installs the kind, kubectl and helm releases prepare pins,
-// each checked against a sha256 compiled into the helper.
+// Package tools pins and installs the tool releases the helper downloads:
+// the kind, kubectl and helm releases prepare installs, and rooket's. Each
+// download is checked against its pin's sha256, which is compiled into the
+// helper, except for a rooket release a consumer names with its own hash.
+// NodeImageTag reads the kind node image rooket boots, so that a spec can
+// hold kubectl's pin to that image's minor version.
 package tools
 
 // Pin fixes one tool release to the sha256 of the file its URL serves.

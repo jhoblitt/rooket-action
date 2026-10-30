@@ -53,6 +53,15 @@ var _ = Describe("Exec", func() {
 		Expect(string(out)).To(Equal("auto"))
 	})
 
+	It("lets an extra env entry with an empty value override the parent's value", func(ctx SpecContext) {
+		GinkgoT().Setenv("GOFLAGS", "-mod=vendor")
+
+		out, err := x.Output(ctx, "", []string{"GOFLAGS="}, "sh", "-c", `printf '%s:%s' "${GOFLAGS+set}" "$GOFLAGS"`)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(out)).To(Equal("set:"), "GOFLAGS in the child, as set-or-not:value")
+	})
+
 	It("layers extra env over the parent's environment rather than replacing it", func(ctx SpecContext) {
 		GinkgoT().Setenv("ROOKET_ACTION_PARENT", "parent")
 

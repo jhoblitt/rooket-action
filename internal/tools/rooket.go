@@ -18,7 +18,8 @@ const (
 // Rooket returns the pin for rooket's release version, whose linux/amd64
 // archive has the hex digest sha256. version may omit its leading v; the
 // pin's Version carries it. Rooket does not check that version is
-// well-formed.
+// well-formed. The pin's SecondSource is empty, because the caller vouches
+// for the hash.
 func Rooket(version, sha256 string) Pin {
 	v := strings.TrimPrefix(version, "v")
 	return Pin{

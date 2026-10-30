@@ -146,20 +146,24 @@ func pause(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// emplace renames the checked download dl to dst or, when member is set,
-// extracts that member of it to dst through a second temporary file.
+// emplace writes the checked download dl to dst through WriteExecutable:
+// the whole file or, when member is set, that member of it.
 func emplace(dl *os.File, member, dst string) error {
 	if member == "" {
-		return place(dl, dst)
+		return WriteExecutable(dst, func(w io.Writer) error {
+			if _, err := dl.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			_, err := io.Copy(w, dl)
+			return err
+		})
 	}
-	out, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+"-*")
-	if err != nil {
-		return err
-	}
-	if err := extract(dl, member, out); err != nil {
-		return errors.Join(fmt.Errorf("extracting %s: %w", member, err), discard(out))
-	}
-	return errors.Join(place(out, dst), discard(out))
+	return WriteExecutable(dst, func(w io.Writer) error {
+		if err := extract(dl, member, w); err != nil {
+			return fmt.Errorf("extracting %s: %w", member, err)
+		}
+		return nil
+	})
 }
 
 // extract copies the regular file named member, out of the gzipped tar
@@ -190,6 +194,23 @@ func extract(f *os.File, member string, dst io.Writer) error {
 		_, err = io.CopyN(dst, tr, hdr.Size)
 		return err
 	}
+}
+
+// WriteExecutable writes dst with mode 0755 from what fill writes. fill
+// writes to a temporary file in dst's directory, which is renamed over dst,
+// so a process running the old dst keeps it intact, fill may read dst
+// itself, and dst is never left partly written. On any failure dst is left
+// as it was, and the temporary file is removed.
+func WriteExecutable(dst string, fill func(io.Writer) error) error {
+	f, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+"-*")
+	if err != nil {
+		return err
+	}
+	err = fill(f)
+	if err == nil {
+		err = place(f, dst)
+	}
+	return errors.Join(err, discard(f))
 }
 
 // place makes f executable, closes it, and renames it to dst. The rename
