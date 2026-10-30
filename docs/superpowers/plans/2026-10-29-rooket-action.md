@@ -21,14 +21,21 @@ flags.
 
 **Spec:** `docs/superpowers/specs/2026-10-29-rooket-action-design.md`.
 
+**Revised 2026-10-30.** rooket now publishes semantic-release binaries, so the
+action downloads a pinned rooket release instead of running `go install` on a
+`go.mod` pin. Tasks 3, 6, 7 and 9 changed. Task 3 needs rooket's first release
+to exist, so the execution order is 0, 1, 2, 4, 5, 3, 6, 7, 8, 9. Tasks 0 and 1
+are done, and the spike's results are in the spec.
+
 ## Global Constraints
 
 **Ownership and process**
 - Repository `jhoblitt/rooket-action`, default branch `main`, visibility
   public. Confirm visibility with the owner at creation; never default it.
 - Execution runs in a session started in the rooket-action clone, so that
-  `EnterWorktree` can make the branch worktrees there. No change is made to
-  jhoblitt/rooket.
+  `EnterWorktree` can make the branch worktrees there. This plan makes no
+  change to jhoblitt/rooket. rooket's releases are a separate piece of work in
+  that repository.
 - Every outward action (repo creation, push, PR) waits for the owner's go-ahead
   for that action. PRs open as drafts, assigned to the author. No GitHub
   comment is posted without an explicit instruction.
@@ -41,8 +48,8 @@ flags.
   `references/logging.md`.
 - GitHub workflow commands (`::warning::`, `::group::`) are protocol output on
   stdout, not logs.
-- `go.mod` carries `tool github.com/jhoblitt/rooket`, pinned to rooket's `main`
-  at execution time.
+- The default rooket release and the sha256 of its linux/amd64 archive are
+  compiled into the helper (Task 3). `go.mod` does not require rooket.
 - Every `go` invocation the action makes, the helper build included, runs with
   `GOTOOLCHAIN=auto`, whatever the consumer set.
 
@@ -56,6 +63,15 @@ flags.
   `RUNNER_OS=Linux` and `RUNNER_ARCH=X64`, checked before anything else.
 - Binary directory: `$RUNNER_TEMP/rooket-action/bin`. It holds the helper,
   rooket, kind, kubectl and helm, and only it is added to `GITHUB_PATH`.
+- rooket install, chosen by the inputs:
+  - `rooket-path` set: copy that file in. Combining it with `rooket-version`
+    or `rooket-sha256` is an error naming both inputs.
+  - Neither `rooket-version` nor `rooket-sha256` set: download the pinned
+    release's archive and check it against the pinned sha256.
+  - Both set: download that release's archive and check it against the given
+    sha256.
+  - `rooket-version` alone: `go install github.com/jhoblitt/rooket@<v>`.
+  - `rooket-sha256` alone: an error.
 - Disk: `min-free-gb`, or else 30 GiB plus 10 GiB × `workers`, free on `/`.
   When short, `sudo rm -rf` exactly `/usr/share/dotnet`,
   `/usr/local/lib/android`, `/opt/ghc`, `/opt/hostedtoolcache/CodeQL`,
@@ -68,6 +84,7 @@ flags.
   | kind | v0.32.0 | `https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64` | `50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54` | kind's GitHub release |
   | kubectl | v1.33.1 | `https://dl.k8s.io/release/v1.33.1/bin/linux/amd64/kubectl` | `5de4e9f2266738fd112b721265a0c1cd7f4e5208b670f811861f699474a100a3` | Kubernetes changelog sha512 of the client tarball |
   | helm | v3.20.1 | `https://get.helm.sh/helm-v3.20.1-linux-amd64.tar.gz`, member `linux-amd64/helm` | `0165ee4a2db012cc657381001e593e981f42aa5707acdd50658326790c9d0dc3`, of the archive | helm's GitHub release |
+  | rooket | rooket's newest release when Task 3 runs | rooket's release linux/amd64 archive, with the binary as its member. The name template comes from rooket's release config | of the archive, from the release's `checksums.txt` | that file's cosign keyless bundle, checked with `cosign verify-blob` against rooket's release workflow identity |
 
 - iSCSI, each command run with `sudo`, in this order:
   1. `apt-get update`
@@ -80,9 +97,9 @@ flags.
   `ROOKET_ENGINE=docker`. A failure prints `::warning::` and exits 0.
 
 **Inputs and outputs**
-- Inputs (all strings): `rooket-version` (empty means the `go.mod` pin),
-  `rooket-path`, `workers` (`1`), `min-free-gb` (empty), `iscsi` (`true`) and
-  `teardown` (`true`).
+- Inputs (all strings): `rooket-version` (empty means the pinned release),
+  `rooket-sha256` (empty), `rooket-path`, `workers` (`1`), `min-free-gb`
+  (empty), `iscsi` (`true`) and `teardown` (`true`).
 - Outputs: `path` and `rooket-version`.
 
 **Workflows**
@@ -110,9 +127,14 @@ Each of these is tested in the task named:
    error naming the input. `workers` is at least 1. `min-free-gb` is empty or
    at least 1. *(Task 6)*
 4. **`rooket-version` written in another form:** a 40-hex SHA, a branch name, a
-   pseudo-version, or the value padded with spaces. Expected: it is trimmed and
-   passed verbatim to `go install …@<v>`, and empty means the `go.mod` pin.
-   *(Task 6)*
+   pseudo-version, or the value padded with spaces. Expected:
+   - Without `rooket-sha256`, it is trimmed and passed verbatim to
+     `go install …@<v>`.
+   - With `rooket-sha256`, that release's archive is downloaded and checked.
+   - Empty means the pinned release.
+   - A consumer hash that does not match is an error naming both hashes, and is
+     not retried.
+   *(Tasks 3 and 6)*
 5. **The action used twice in one job.** Expected: the second `setup`
    overwrites the binaries in place and succeeds, and the second post-step
    teardown finds nothing and exits 0. *(Tasks 2 and 6)*
@@ -218,39 +240,58 @@ the owner's go-ahead first.
 - [ ] **Step 4:** Run `go test ./internal/tools/...`. Expected: PASS.
 - [ ] **Step 5:** Commit `feat(tools): download pinned kind, kubectl and helm`.
 
-### Task 3: The rooket pin, and kubectl following its node image
+### Task 3: The rooket release pin, and kubectl following its node image
+
+This task blocks on rooket's first release. Run it after Task 5.
 
 **Files:**
-- Modify: `go.mod` and `go.sum`, through
-  `go get -tool github.com/jhoblitt/rooket@main`
-- Create: `internal/tools/nodeimage.go`
-- Test: `internal/tools/nodeimage_test.go`
+- Create: `internal/tools/rooket.go`, `internal/tools/nodeimage.go`
+- Test: `internal/tools/rooket_test.go`, `internal/tools/nodeimage_test.go`
 
 **Interfaces:**
-- Consumes: `Pins()` from Task 2.
-- Produces: `func NodeImageTag(rooketModuleDir string) (string, error)`. It
-  parses `<dir>/cmd/nodeimage.go` with `go/parser` and returns the tag of the
-  string constant `defaultNodeImage`, for example `v1.33.1` from
-  `kindest/node:v1.33.1@sha256:…`.
+- Consumes: `Pin`, `Pins()` and `Install` from Task 2.
+- Produces:
+  - `func Rooket(version, sha256 string) Pin`. It builds the pin for one rooket
+    release: `Name` `rooket`, the release archive's URL and member from
+    rooket's release name template, and the given hash.
+  - `func DefaultRooket() Pin`, which is `Rooket` applied to the compiled-in
+    default version and hash.
+  - `Pins()` is unchanged: it still returns kind, kubectl and helm only. rooket
+    is installed by Task 6, according to the inputs.
+  - `func NodeImageTag(rooketModuleDir string) (string, error)`. It parses
+    `<dir>/cmd/nodeimage.go` with `go/parser` and returns the tag of the
+    string constant `defaultNodeImage`, for example `v1.33.1` from
+    `kindest/node:v1.33.1@sha256:…`.
 
-- [ ] **Step 1: Write the failing specs.**
+- [ ] **Step 1: Pin the release.** Take rooket's newest release, and fetch its
+  `checksums.txt` and that file's cosign bundle. Run `cosign verify-blob`
+  against the certificate identity of rooket's release workflow and the issuer
+  `https://token.actions.githubusercontent.com`. Copy the linux/amd64
+  archive's sha256 from the verified file. The report records each command and
+  its output.
+- [ ] **Step 2: Write the failing specs.**
+  - `Rooket("vX.Y.Z", h)` yields the URL and member that rooket's name template
+    gives for that version, and carries `h`.
+  - `DefaultRooket()` has a `vMAJOR.MINOR.PATCH` version with major 1, a
+    64-hex `SHA256`, and a non-empty `SecondSource`.
   - On a fixture directory whose `cmd/nodeimage.go` declares the constant,
     `NodeImageTag` returns `v1.33.1`.
   - A fixture without the constant returns an error naming both the file and
     `defaultNodeImage`. That message is what someone sees when rooket renames
     it.
-  - **Pairing spec:** it resolves the pinned rooket's directory from the `Dir`
-    field of `go mod download -json github.com/jhoblitt/rooket`. That command,
-    unlike `go list -m`, fetches the source on a cold cache. It asserts that the
-    kubectl pin's `vMAJOR.MINOR` equals that of `NodeImageTag`. Its failure
-    message names both versions and says to bump kubectl's pin, with its
-    hash, in `pins.go`.
-- [ ] **Step 2:** Run `go test ./internal/tools/...`. Expected: FAIL.
-- [ ] **Step 3:** Pin rooket and implement `NodeImageTag`.
-- [ ] **Step 4:** Run `make check`. Expected: PASS, `tidy-check` included, so
-  the `tool` line survives tidy.
-- [ ] **Step 5:** Commit
-  `feat(tools): pin rooket and check kubectl against its node image`.
+  - **Pairing spec:** it resolves the pinned release's source directory from
+    the `Dir` field of
+    `go mod download -json github.com/jhoblitt/rooket@<DefaultRooket().Version>`.
+    That command fetches the source even on a cold cache, and `go.mod` does
+    not require rooket. The spec asserts that the kubectl pin's `vMAJOR.MINOR`
+    equals that of `NodeImageTag`. Its failure message names both versions and
+    says to bump kubectl's pin, with its hash, in `pins.go`.
+- [ ] **Step 3:** Run `go test ./internal/tools/...`. Expected: FAIL.
+- [ ] **Step 4:** Implement `Rooket`, `DefaultRooket` and `NodeImageTag`.
+- [ ] **Step 5:** Run `make check`. Expected: PASS. `go.mod` gains no rooket
+  requirement.
+- [ ] **Step 6:** Commit
+  `feat(tools): pin rooket's release and check kubectl against its node image`.
 
 ### Task 4: Runner guard and disk
 
@@ -345,16 +386,22 @@ the owner's go-ahead first.
 - Test: `internal/rooket/install_test.go`, `cmd/rooket-action/*_test.go`
 
 **Interfaces:**
-- Consumes: Task 5's `prepare.Run`, `Config`, `Deps` and `ghfiles`, and Task 4's
-  `sys.Runner`.
+- Consumes:
+  - Task 5's `prepare.Run`, `Config`, `Deps` and `ghfiles`;
+  - Task 4's `sys.Runner`;
+  - Task 3's `Rooket` and `DefaultRooket`;
+  - Task 2's `Install` and `Retry`.
 - Produces the CLI contract that Task 7's JavaScript calls:
-  - `rooket-action setup --go <path> --action-dir <dir> --bin-dir <dir> --rooket-version <s> --rooket-path <s> --workers <s> --min-free-gb <s> --iscsi <s>`
+  - `rooket-action setup --go <path> --bin-dir <dir> --rooket-version <s> --rooket-sha256 <s> --rooket-path <s> --workers <s> --min-free-gb <s> --iscsi <s>`
   - `rooket-action teardown --rooket <path> --teardown <s>`
   - Input flags are strings, parsed by `inputs.go`. `ParseBool` accepts
     `true`/`false` case-insensitively. Otherwise each error names the input in
     the form `input iscsi: "no" is not true or false`.
-  - `func rooket.Install(ctx context.Context, r sys.Runner, o rooket.Options) (path string, err error)`,
-    where `Options{ Go, ActionDir, BinDir, Version, Path string }`.
+  - `func rooket.Install(...) (path string, err error)` takes:
+    - the runner;
+    - the HTTP client and `tools.Retry` it hands to `tools.Install`;
+    - `rooket.Options{ Go, BinDir, Version, SHA256, Path string }`.
+    The exact parameter list is the builder's call.
   - `func rooket.Version(ctx context.Context, bin string) (string, error)`
     returns the second word of the first line of `rooket version`.
 
@@ -368,16 +415,25 @@ the owner's go-ahead first.
 `teardown` exits 0 in every case except a flag error.
 
 - [ ] **Step 1: Write the failing specs** (Review Focus 1–5).
-  - **Version resolution.** `Install` with an empty `Version` runs
-    `go list -m -f {{.Version}} github.com/jhoblitt/rooket` through `Output`,
-    with `dir` set to `ActionDir`. It
-    then runs `go install github.com/jhoblitt/rooket@<that>` with
-    `GOBIN=<BinDir>` and `GOTOOLCHAIN=auto` in the call's `env`.
+  - **Default release.** `Install` with empty `Version`, `SHA256` and `Path`
+    downloads `DefaultRooket()`'s archive, from an `httptest` server standing
+    in for GitHub, and checks it against the pinned hash. `BinDir/rooket`
+    then exists with mode 0755, and no `go` call is made. How the test
+    redirects the download is the builder's call.
+  - **Consumer release.** `Version` and `SHA256` both set download
+    `Rooket(Version, SHA256)`'s archive. A hash that does not match is an
+    error naming both hashes, after one request.
+  - **go install fallback.** `Version` alone runs
+    `go install github.com/jhoblitt/rooket@<v>` with `GOBIN=<BinDir>` and
+    `GOTOOLCHAIN=auto` in the call's `env`, and makes no HTTP request.
   - **Toolchain override.** A parent environment holding `GOTOOLCHAIN=local`
-    still yields `GOTOOLCHAIN=auto` in both calls' `env`.
-  - **Version forms.** `Version: "  0123abcd…(40 hex)  "` installs `@0123abcd…`
-    trimmed, with no `go list` call. The same holds for `main` and for a
-    pseudo-version.
+    still yields `GOTOOLCHAIN=auto` in that call's `env`.
+  - **Version forms.** `Version: "  0123abcd…(40 hex)  "` alone installs
+    `@0123abcd…`, trimmed. The same holds for `main` and for a pseudo-version.
+  - **Input conflicts.** `SHA256` alone is an error naming `rooket-sha256` and
+    `rooket-version`. `Path` with `Version` or `SHA256` is an error naming both
+    inputs. A `SHA256` that is not 64 hex digits is an error naming
+    `rooket-sha256`.
   - **Copied binary.** With `Path: "./rooket"`, cwd set to a temp directory,
     and a source file of mode 0644: no `go` calls, and `BinDir/rooket` exists
     with mode 0755 and the same bytes.
@@ -437,6 +493,7 @@ The JavaScript's behaviour:
 
 - [ ] **Step 1: Write the self-test spec** (`test/selftest`, Ginkgo, run only in
   CI). It asserts:
+  - `rooket version` reports `tools.DefaultRooket().Version`.
   - `exec.LookPath("rooket")` equals `$ROOKET_ACTION_PATH`, which the workflow
     sets from the `path` output.
   - For each `tools.Pins()` entry, `LookPath` resolves into `dir(path)`, and the
@@ -445,7 +502,7 @@ The JavaScript's behaviour:
   - `systemctl is-active iscsid` prints `active`.
   - `lsmod` lists `target_core_mod`, `target_core_file`, `iscsi_target_mod` and
     `iscsi_tcp`, and configfs is mounted at `/sys/kernel/config`.
-- [ ] **Step 2:** Write `action.yml`, with the six inputs, their defaults and
+- [ ] **Step 2:** Write `action.yml`, with the seven inputs, their defaults and
   the two outputs, and the three JavaScript files. Run `node --check` on each.
   Expected: no output.
 - [ ] **Step 3:** Write `self-test.yml`, triggered on `pull_request` and
@@ -535,12 +592,15 @@ The JavaScript's behaviour:
   - the `uses:` line pinned by SHA with `# vX.Y.Z`;
   - the inputs and outputs table from the spec;
   - running `actions/setup-go` first when the job needs Go anyway;
-  - `rooket-version` for testing an unreleased rooket;
+  - `rooket-version` with `rooket-sha256` for trying a newer rooket release, and
+    `rooket-version` alone for testing an unreleased rooket;
   - the consumer still running `rooket up` and its own teardown, with the post
     step as a safety net;
   - the GitHub-hosted Linux x64 limit and why;
-  - how the rooket pin moves: `go get -tool github.com/jhoblitt/rooket@main`,
-    committed as `fix(deps): …`.
+  - how the rooket pin moves:
+    - verify the release's cosign bundle over `checksums.txt`;
+    - update the version and hash in `internal/tools/rooket.go`;
+    - commit as `fix(deps): …`.
 - [ ] **Step 2:** Commit `docs: document using the action`, and land it on the
   Tasks 2–7 PR before merge, so `v1.0.0` ships documented.
 

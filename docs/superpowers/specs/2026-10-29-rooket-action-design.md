@@ -1,8 +1,9 @@
 # rooket-action: a GitHub action that prepares a runner for rooket
 
 Date: 2026-10-29
-Status: approved in conversation 2026-10-29; to be committed to
-jhoblitt/rooket-action as its first design document
+Status: approved in conversation 2026-10-29. Revised 2026-10-30: rooket
+publishes release binaries, and the action downloads one instead of building
+rooket.
 
 ## Problem
 
@@ -44,10 +45,9 @@ supported skew from the node image rooket pins (v1.33.1).
   up, its diagnostics, and its in-job teardown stay in the consumer. rgw-go's
   `make cluster-up` runs the same path locally and in CI, and wraps `rooket up`
   in checks only rgw-go can make.
-- Any change to rooket. The owner declined a CI-only rooket subcommand; rooket
-  gains nothing for this action.
-- Tagging rooket. rooket stays untagged (the owner's decision), so the action
-  pins it by pseudo-version.
+- Any change to rooket made for this action. The owner declined a CI-only
+  rooket subcommand. rooket's semantic-release releases are rooket's own
+  change, made in its repository, and the action only consumes them.
 - Self-hosted runners, non-Ubuntu runners, and arm64. The steps assume a
   disposable GitHub-hosted `ubuntu-*` x64 runner with passwordless sudo.
 - Podman. A hosted runner's podman is rootless, which rooket refuses, and
@@ -131,46 +131,80 @@ repository, which follows go-conventions (cobra, Ginkgo, Go 1.27).
 1. **Find Go.** It looks on `PATH`, where hosted runners have one (see
    "Verify before building", results). A Go older than the one the helper's or
    rooket's `go.mod` names is acceptable, because `GOTOOLCHAIN=auto` fetches
-   the rest. If no Go is found, it fails and
-   names `actions/setup-go` as the fix. A consumer that needs Go for its own
-   steps may run `actions/setup-go` first, as rgw-go will, and the action then
-   uses that Go.
+   the rest. If no Go is found, it fails and names `actions/setup-go` as the
+   fix. A consumer that needs Go for its own steps may run `actions/setup-go`
+   first, as rgw-go will, and the action then uses that Go.
 2. **Build the helper** from the action's own source, which the runner
    downloaded at the commit the consumer pinned. Into the action's directory
    under `RUNNER_TEMP`.
-3. **Install rooket** into the same directory, in one of two ways.
-   - `rooket-path` set: copy that binary in. The caller's workspace never goes
-     on `PATH`.
-   - Otherwise: `go install github.com/jhoblitt/rooket@<v>` with `GOBIN` set to
-     that directory. `<v>` is the `rooket-version` input, or else the version
-     rooket-action's `go.mod` pins. The Go checksum database verifies the
-     module, which is not the host serving it, so rgw-go's integrity rule
-     holds. `rooket version` then reports that version.
+3. **Install rooket** into the same directory. *(The owner's decisions.)*
+   - **`rooket-path` set:** copy that binary in. The caller's workspace never
+     goes on `PATH`. Combining it with `rooket-version` or `rooket-sha256` is
+     an input error.
+   - **Neither `rooket-version` nor `rooket-sha256` set:** download the pinned
+     rooket release's linux/amd64 archive from GitHub (see "The rooket pin").
+     Check it against the pinned sha256, then extract `rooket`.
+   - **Both set:** do the same, with the consumer's version and hash in place
+     of the pin.
+   - **`rooket-version` set alone:** run
+     `go install github.com/jhoblitt/rooket@<v>` with `GOBIN` set to that
+     directory. This covers a commit or branch that has no release. The Go
+     checksum database verifies the module, and that database is not the
+     host serving it, so rgw-go's integrity rule holds.
+   - **`rooket-sha256` set alone:** an input error, because it names no
+     archive.
+
+   In every case, `rooket version` then reports the version installed.
 4. **Run the helper's prepare step** (below).
 5. **Save the binary's path for `post`**, only after prepare succeeds.
 
-rgw-go accepted a source build per job for its PR-gating job. It costs a Go
-build of the helper and a `go install` of rooket, expected to take under a
-minute but not yet measured. *(My call:)* if the measured time, toolchain fetch
-included, exceeds two minutes, building on the runner is reopened with the owner
-before anything else is built on it.
+rgw-go accepted building the helper on the runner for every job of its
+PR-gating workflow. The spike measured the cost (see "Verify before building",
+results):
+- The helper build takes under 20 s from a cold cache.
+- A rooket `go install` takes 22–80 s. The release download replaces it by
+  default.
+- Only a job that overrides `rooket-version` without a hash pays for the
+  `go install` again.
 
 ### The rooket pin
 
-rooket-action's `go.mod` carries `tool github.com/jhoblitt/rooket`, which keeps
-the pin and its `go.sum` hashes from being removed by `go mod tidy`, since
-nothing imports rooket. The pin is a pseudo-version, because rooket is
-untagged.
+rooket publishes its releases through semantic-release. *(The owner's
+decision. The release setup itself is rooket's change.)* rooket-action needs
+each release to carry three things:
+- a linux/amd64 archive;
+- a `checksums.txt`;
+- a cosign keyless signature over that file.
 
-Dependabot cannot bump a pseudo-version, so the pin moves by hand: run
-`go get -tool github.com/jhoblitt/rooket@main` and commit the result as
-`fix(deps): …`. That commit cuts a patch release, and Dependabot then bumps
-every consumer's pin on the action. One pin now serves every consumer, where
-each consumer used to keep its own.
+**Where the pin lives.** The helper compiles in the default rooket version and
+the sha256 of its archive, as it does for the kind, kubectl and helm pins.
+That pin is the only copy. `go.mod` does not require rooket, because nothing
+imports it. A second copy there would hold the version without the hash, and a
+Dependabot bump of it would neither carry the hash nor cut a release.
 
-The `rooket-version` input overrides the pin for one job, for example to try an
-unreleased rooket fix in rgw-go's CI. It accepts anything `go install` accepts.
-*(The owner's decision.)*
+**Moving the pin** is a manual step:
+1. Pick the release.
+2. Verify the cosign bundle over its `checksums.txt` against the identity of
+   rooket's release workflow.
+3. Copy the archive's sha256 from that file into the pin.
+4. Commit the change as `fix(deps): …`.
+
+The signature is checked against Sigstore's transparency log, which is not the
+host serving the archive, and that log is the hash's second source. The commit
+cuts a patch release of the action, and Dependabot then bumps every consumer's
+pin on the action. One pin now serves every consumer, where each consumer used
+to keep its own.
+
+**Overriding the pin for one job.** *(The owner's decisions.)*
+- `rooket-version` and `rooket-sha256` together override the pin, for example
+  to try a newer rooket release before the action pins it. The consumer then
+  vouches for the hash.
+- `rooket-version` alone accepts anything `go install` accepts, for example to
+  try an unreleased rooket fix in rgw-go's CI.
+
+rooket's releases must either stay at major version 1 or move rooket's module
+path to `/v2`. A v2 tag on an unchanged module path breaks both the
+`go install` fallback and the node-image check below.
 
 ### prepare
 
@@ -223,19 +257,19 @@ and `iscsid`, prepare changes nothing on the machine.
 
 ### kubectl and the node image
 
-kubectl is pinned in rooket-action, like kind and helm. A unit test reads the
-pinned rooket's module source from the module cache, parses its default node
-image constant, and fails if kubectl's major and minor differ from that
-image's tag. A rooket bump that moves the node image therefore fails
-rooket-action's CI until kubectl follows it.
+kubectl is pinned in rooket-action, like kind and helm. A unit test fetches the
+module source of the pinned rooket release at its tag, through the Go module
+proxy. It parses rooket's default node image constant, and fails if kubectl's
+major and minor differ from that image's tag. A rooket bump that moves the
+node image therefore fails rooket-action's CI until kubectl follows it.
 
 The test couples rooket-action to a rooket constant's name and file. If rooket
 renames it, the test fails, never a consumer's job, which is the acceptable
 place for that break.
 
-A `rooket-version` override does not move kubectl. kubectl's supported skew of
-one minor covers an override close to the pin, and an override is the
-consumer's deliberate choice.
+A `rooket-version` override, with or without a hash, does not move kubectl.
+kubectl's supported skew of one minor covers an override close to the pin, and
+an override is the consumer's deliberate choice.
 
 ### post
 
@@ -258,8 +292,9 @@ diagnostics, then its own teardown, then this step, which finds nothing.
 
 | Input | Default | Meaning |
 |---|---|---|
-| `rooket-version` | the pin in `go.mod` | rooket version or commit to `go install` |
-| `rooket-path` | empty | Use this binary instead of installing one |
+| `rooket-version` | the pinned release | rooket release to download. Alone, a version or commit to `go install` |
+| `rooket-sha256` | the pinned hash | sha256 of that release's linux/amd64 archive. Needs `rooket-version` |
+| `rooket-path` | empty | Use this binary instead of installing one. Excludes the two above |
 | `workers` | `1` | Worker count, used only to size the disk check |
 | `min-free-gb` | empty | Overrides the disk formula |
 | `iscsi` | `true` | Install and load the iSCSI and LVM tooling |
@@ -275,7 +310,8 @@ diagnostics, then its own teardown, then this step, which finds nothing.
 - **Go:** `make check`, as go-conventions defines it.
 - **Self-test, setup only:** runs `uses: ./` on `ubuntu-latest` with the
   defaults, then asserts the following:
-  - `rooket` on `PATH` is the `path` output.
+  - `rooket` on `PATH` is the `path` output, and `rooket version` reports the
+    pinned release.
   - kind, kubectl and helm resolve to the action's directory and report their
     pinned versions.
   - `ROOKET_ENGINE` is `docker`.
