@@ -128,9 +128,10 @@ repository, which follows go-conventions (cobra, Ginkgo, Go 1.27).
 
 ### main
 
-1. **Find Go.** It looks on `PATH` first, then in the runner's tool cache. A Go
-   older than the one the helper's or rooket's `go.mod` names is acceptable,
-   because `GOTOOLCHAIN=auto` fetches the rest. If no Go is found, it fails and
+1. **Find Go.** It looks on `PATH`, where hosted runners have one (see
+   "Verify before building", results). A Go older than the one the helper's or
+   rooket's `go.mod` names is acceptable, because `GOTOOLCHAIN=auto` fetches
+   the rest. If no Go is found, it fails and
    names `actions/setup-go` as the fix. A consumer that needs Go for its own
    steps may run `actions/setup-go` first, as rgw-go will, and the action then
    uses that Go.
@@ -306,6 +307,37 @@ task is a throwaway workflow that checks them:
 If (1) or (3) fails, the fallback changes the design: require
 `actions/setup-go` before the action, or ship the helper prebuilt. It therefore
 comes back to the owner rather than being made silently.
+
+### Results (2026-10-30)
+
+A throwaway workflow on ubuntu-24.04, image 20261025.353.1, answered all five
+questions. It ran one job with `uses: ./` and one with
+`uses: jhoblitt/rooket-action@<sha>`, and neither job used `actions/setup-go`.
+
+1. Holds. The remote action's directory,
+   `/home/runner/work/_actions/jhoblitt/rooket-action/<sha>`, held the whole
+   repository, `go.mod`, `cmd/` and `internal/` included.
+2. Holds. `post` ran for the local action.
+3. Holds.
+   - `/usr/bin/go` is on `PATH`, at go1.24.13.
+   - The tool cache holds 1.24.13, 1.25.14 and 1.26.10.
+   - `GOTOOLCHAIN=auto` fetched go1.27.0 for the helper's module and go1.27.3
+     for rooket.
+   - Because Go is on `PATH`, `main` looks for Go on `PATH` only, with no
+     tool-cache scan.
+4. Holds. `GITHUB_ACTIONS=true`, `RUNNER_ENVIRONMENT=github-hosted`,
+   `RUNNER_OS=Linux` and `RUNNER_ARCH=X64`.
+5. Under the limit. The cache was cold in both jobs.
+
+   | Step | Local job | Remote job |
+   |---|---|---|
+   | Toolchain fetch | 3.9 s | 4.7 s |
+   | Helper build | 16.7 s | 17.8 s |
+   | rooket `go install` | 80.3 s | 22.1 s |
+   | Total | about 101 s | about 45 s |
+
+   The slower total comes within 20 s of the two-minute limit, and the
+   difference between the jobs is the module download.
 
 ## Follow-ups outside this repository
 
