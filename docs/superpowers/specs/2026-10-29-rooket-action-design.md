@@ -202,8 +202,8 @@ to keep its own.
 - `rooket-version` alone accepts anything `go install` accepts, for example to
   try an unreleased rooket fix in rgw-go's CI.
 
-rooket's releases must either stay at major version 1 or move rooket's module
-path to `/v2`. A v2 tag on an unchanged module path breaks both the
+rooket's releases must either stay below v2, at v0 or v1, or move rooket's
+module path to `/v2`. A v2 tag on an unchanged module path breaks both the
 `go install` fallback and the node-image check below.
 
 ### prepare
