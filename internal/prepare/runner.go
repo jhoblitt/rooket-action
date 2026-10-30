@@ -1,4 +1,3 @@
-// Package prepare readies a disposable GitHub-hosted runner for rooket.
 package prepare
 
 import "context"
