@@ -2,16 +2,18 @@
 # hygiene this complies with is github-conventions' references/workflows.md).
 name: ci
 
+# No push trigger: release.yml calls this on every push to main.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
+# A literal prefix rather than github.workflow: a called workflow sees its
+# caller's name, which would put two calls from one caller in one group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:

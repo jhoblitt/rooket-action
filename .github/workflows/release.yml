@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A release must never be cancelled mid-run, so every run shares one group
+# and waits its turn.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Every job carries the fork guard, so a fork's push to main runs neither a
+# release nor the hour-long cluster self-test.
+jobs:
+  ci:
+    if: github.repository == 'jhoblitt/rooket-action'
+    uses: ./.github/workflows/ci.yml
+
+  self-test:
+    if: github.repository == 'jhoblitt/rooket-action'
+    uses: ./.github/workflows/self-test.yml
+
+  release:
+    needs: [ci, self-test]
+    if: github.repository == 'jhoblitt/rooket-action'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # semantic-release reads every tag and commit since the last release.
+      # It pushes its tag through a URL carrying GITHUB_TOKEN, so checkout
+      # need not persist one.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+
+      - name: Install semantic-release
+        run: npm ci --ignore-scripts
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release

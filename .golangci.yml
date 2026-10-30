@@ -4,9 +4,11 @@ version: "2"
 
 run:
   timeout: 5m
-  # Integration specs sit behind a build tag; the analyzers must see them.
+  # Integration specs, and the self-test that runs only on a runner the
+  # action prepared, sit behind build tags; the analyzers must see them.
   build-tags:
     - integration
+    - selftest
 
 formatters:
   enable:

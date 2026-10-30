@@ -18,3 +18,18 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+  # semantic-release and its plugins, pinned by package-lock.json.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-dependencies:
+        patterns: ["*"]
+    # The preset's 10.x renders only through conventional-changelog-writer 9,
+    # and release-notes-generator 14 still loads writer 8, so a 10.x bump
+    # breaks every release. Move both together, by hand, once the generator
+    # ships on writer 9.
+    ignore:
+      - dependency-name: conventional-changelog-conventionalcommits
+        update-types: ["version-update:semver-major"]

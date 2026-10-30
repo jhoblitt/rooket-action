@@ -1,0 +1,53 @@
+name: rooket-action
+description: Prepare a GitHub-hosted Ubuntu runner to run rooket, and tear down what rooket left behind after the job.
+author: jhoblitt
+
+inputs:
+  rooket-version:
+    description: >-
+      The rooket release to download. Set alone, without rooket-sha256, any
+      version, branch or commit that `go install` accepts. Empty means the
+      release the action pins.
+    required: false
+    default: ""
+  rooket-sha256:
+    description: >-
+      The sha256 of that release's linux/amd64 archive. Needs rooket-version.
+      Empty means the pinned release's hash.
+    required: false
+    default: ""
+  rooket-path:
+    description: >-
+      Use this rooket binary instead of installing one. Excludes
+      rooket-version and rooket-sha256.
+    required: false
+    default: ""
+  workers:
+    description: The worker count, used only to size the disk check.
+    required: false
+    default: "1"
+  min-free-gb:
+    description: >-
+      The free space, in GiB, that / needs, in place of the disk formula of
+      30 GiB plus 10 GiB per worker. Empty means the formula.
+    required: false
+    default: ""
+  iscsi:
+    description: Install and load the iSCSI and LVM tooling.
+    required: false
+    default: "true"
+  teardown:
+    description: Run the post-step teardown.
+    required: false
+    default: "true"
+
+outputs:
+  path:
+    description: The absolute path of the rooket binary, which is also on PATH.
+  rooket-version:
+    description: What `rooket version` reports for that binary.
+
+runs:
+  using: node24
+  main: js/main.mjs
+  post: js/post.mjs

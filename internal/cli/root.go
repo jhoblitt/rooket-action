@@ -21,12 +21,17 @@ import (
 
 // Run executes the command tree against args and returns the first error.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	cmd := newRootCmd(stdin, stdout, stderr)
+	return run(ctx, args, stdin, stdout, stderr, productionDeps)
+}
+
+// run is Run with the subcommands' dependencies built by nd.
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, nd newDeps) error {
+	cmd := newRootCmd(stdin, stdout, stderr, nd)
 	cmd.SetArgs(args)
 	return cmd.ExecuteContext(ctx)
 }
 
-func newRootCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+func newRootCmd(stdin io.Reader, stdout, stderr io.Writer, nd newDeps) *cobra.Command {
 	v := viper.New()
 	cmd := &cobra.Command{
 		Use:           "rooket-action",
@@ -37,11 +42,6 @@ func newRootCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			return configure(cmd, v, stderr)
 		},
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			slog.InfoContext(cmd.Context(), "greeting", slog.String("name", v.GetString("name")))
-			fmt.Fprintf(cmd.OutOrStdout(), "hello, %s\n", v.GetString("name"))
-			return nil
-		},
 	}
 	cmd.SetIn(stdin)
 	cmd.SetOut(stdout)
@@ -51,8 +51,8 @@ func newRootCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	pf.String("config", "", "config file to read after flags and environment")
 	pf.String("log-level", "info", "log level: debug, info, warn, or error (ROOKET_ACTION_LOG_LEVEL)")
 	pf.String("log-format", "json", "log format: json or text (ROOKET_ACTION_LOG_FORMAT)")
-	cmd.Flags().String("name", "world", "who to greet (ROOKET_ACTION_NAME)")
 
+	cmd.AddCommand(newSetupCmd(v, nd), newTeardownCmd(v, nd))
 	return cmd
 }
 
