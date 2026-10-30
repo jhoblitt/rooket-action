@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
+
+	"github.com/jhoblitt/rooket-action/internal/ghcmd"
 )
 
 const (
@@ -78,17 +79,13 @@ func EnsureDisk(ctx context.Context, r Runner, free func(path string) (uint64, e
 	return nil
 }
 
-// workflowData escapes what would otherwise end or garble a workflow
-// command's message, as the Actions runner expects.
-var workflowData = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A")
-
 // warning writes msg to w as a ::warning:: workflow command and returns nil
 // or, once ctx is done, writes nothing and returns ctx's error.
 func warning(ctx context.Context, w io.Writer, msg string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("freeing disk space: %w", err)
 	}
-	fmt.Fprintf(w, "::warning::%s\n", workflowData.Replace(msg))
+	ghcmd.Warning(w, msg)
 	return nil
 }
 

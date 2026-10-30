@@ -146,15 +146,6 @@ var _ = Describe("EnsureDisk", func() {
 		Expect(strings.Count(warn.String(), "\n")).To(Equal(1), "warn holds %q", warn.String())
 	})
 
-	It("escapes an error's newline and percent sign so the warning stays one workflow command", func(ctx SpecContext) {
-		d := &disk{err: errors.New("100% broken\nsecond line")}
-
-		Expect(prepare.EnsureDisk(ctx, runner, d.free, 40*gib, warn)).To(Succeed())
-
-		Expect(warn.String()).To(Equal(
-			"::warning::measuring free disk space on /: 100%25 broken%0Asecond line; deleting nothing\n"))
-	})
-
 	DescribeTable("returns the context's error in place of a warning once canceled",
 		func(sctx SpecContext, readings []uint64, freeErr, runErr error) {
 			ctx, cancel := context.WithCancel(sctx)
