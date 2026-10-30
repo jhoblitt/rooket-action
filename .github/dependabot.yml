@@ -9,3 +9,12 @@ updates:
     groups:
       go-dependencies:
         patterns: ["*"]
+  # The GitHub Actions entry, from github-conventions (references/workflows.md,
+  # Dependabot), which owns this file.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
