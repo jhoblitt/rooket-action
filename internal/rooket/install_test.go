@@ -38,7 +38,10 @@ var _ rooket.Runner = sys.Exec{}
 // string's.
 const otherHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-const goBin = "/opt/hostedtoolcache/go/1.27.0/x64/bin/go"
+const (
+	goBin      = "/opt/hostedtoolcache/go/1.27.0/x64/bin/go"
+	goModCache = "/home/runner/work/_temp/rooket-action/gomodcache"
+)
 
 func asIs(h string) string { return h }
 
@@ -236,9 +239,9 @@ var _ = Describe("Install", func() {
 	})
 
 	Context("with rooket-version alone", func() {
-		DescribeTable("runs go install for it, trimmed and otherwise verbatim, into BinDir, shielded from the parent's Go environment",
+		DescribeTable("runs go install for it, trimmed and otherwise verbatim, into BinDir with its own module cache, shielded from the parent's Go environment",
 			func(ctx SpecContext, version, want string) {
-				path, err := rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goBin, BinDir: binDir, Version: version})
+				path, err := rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goBin, GoModCache: goModCache, BinDir: binDir, Version: version})
 
 				Expect(err).NotTo(HaveOccurred())
 				Expect(path).To(Equal(filepath.Join(binDir, "rooket")))
@@ -246,7 +249,7 @@ var _ = Describe("Install", func() {
 				_, env, name, args := runner.RunArgsForCall(0)
 				Expect(name).To(Equal(goBin))
 				Expect(args).To(Equal([]string{"install", "github.com/jhoblitt/rooket@" + want}))
-				Expect(env).To(ConsistOf("GOBIN="+binDir, "GOTOOLCHAIN=auto", "GOWORK=off", "GOFLAGS=", "GOOS=", "GOARCH=",
+				Expect(env).To(ConsistOf("GOBIN="+binDir, "GOMODCACHE="+goModCache, "GOTOOLCHAIN=auto", "GOWORK=off", "GOFLAGS=", "GOOS=", "GOARCH=",
 					"GOENV=off", "GOSUMDB=sum.golang.org", "GONOSUMDB=", "GOPRIVATE="))
 				Expect(hits.Load()).To(BeZero(), "HTTP requests")
 			},
@@ -261,13 +264,15 @@ var _ = Describe("Install", func() {
 			func(ctx SpecContext, key, parent, want string) {
 				GinkgoT().Setenv(key, parent)
 
-				_, err := rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goBin, BinDir: binDir, Version: "main"})
+				_, err := rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goBin, GoModCache: goModCache, BinDir: binDir, Version: "main"})
 
 				Expect(err).NotTo(HaveOccurred())
 				Expect(runner.RunCallCount()).To(Equal(1), "Run calls")
 				_, env, _, _ := runner.RunArgsForCall(0)
 				Expect(env).To(ContainElement(want), "env with the parent's %s=%s", key, parent)
 			},
+			Entry("the consumer's module cache, which actions/setup-go restores", "GOMODCACHE", "/home/runner/go/pkg/mod",
+				"GOMODCACHE="+goModCache),
 			Entry("a toolchain policy that blocks the fetch", "GOTOOLCHAIN", "local", "GOTOOLCHAIN=auto"),
 			Entry("a workspace file", "GOWORK", "/x/go.work", "GOWORK=off"),
 			Entry("vendoring flags", "GOFLAGS", "-mod=vendor", "GOFLAGS="),
@@ -304,7 +309,7 @@ var _ = Describe("Install", func() {
 			Expect(goEnv(nil)).To(Equal([]string{"-mod=vendor", "off", "github.com/jhoblitt/*", "github.com/jhoblitt/*"}),
 				"go env in the parent's environment, which reads the file")
 
-			_, err = rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goTool, BinDir: binDir, Version: "main"})
+			_, err = rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goTool, GoModCache: goModCache, BinDir: binDir, Version: "main"})
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(runner.RunCallCount()).To(Equal(1), "Run calls")
@@ -317,7 +322,7 @@ var _ = Describe("Install", func() {
 			cause := errors.New("exit status 1")
 			runner.RunReturns(cause)
 
-			path, err := rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goBin, BinDir: binDir, Version: "main"})
+			path, err := rooket.Install(ctx, runner, client, retry, rooket.Options{Go: goBin, GoModCache: goModCache, BinDir: binDir, Version: "main"})
 
 			Expect(err).To(MatchError(cause))
 			Expect(path).To(BeEmpty())

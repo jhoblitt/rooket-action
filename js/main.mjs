@@ -13,6 +13,7 @@ if (runnerTemp === '') {
   process.exit(1);
 }
 const binDir = join(runnerTemp, 'rooket-action', 'bin');
+const goModCache = join(runnerTemp, 'rooket-action', 'gomodcache');
 const helper = join(binDir, 'rooket-action');
 
 const go = findGo();
@@ -37,10 +38,21 @@ mkdirSync(binDir, { recursive: true });
 // GOFLAGS (-mod=vendor, say) or cross-compilation target would break the
 // build or produce a helper this runner cannot run. go reads an empty
 // variable as unset and falls back to the go env -w file, so GOENV=off is
-// what keeps the emptied ones empty.
+// what keeps the emptied ones empty. The module cache is the action's own:
+// go makes each module it extracts read-only, so a later actions/setup-go
+// step fails to restore a cache holding the same module over it.
 const built = mustRun(go, ['build', '-o', helper, './cmd/rooket-action'], {
   cwd: actionDir,
-  env: { ...process.env, GOTOOLCHAIN: 'auto', GOWORK: 'off', GOFLAGS: '', GOOS: '', GOARCH: '', GOENV: 'off' },
+  env: {
+    ...process.env,
+    GOMODCACHE: goModCache,
+    GOTOOLCHAIN: 'auto',
+    GOWORK: 'off',
+    GOFLAGS: '',
+    GOOS: '',
+    GOARCH: '',
+    GOENV: 'off',
+  },
 });
 if (built !== 0) {
   process.exit(built);
@@ -53,6 +65,7 @@ process.exit(
     'setup',
     '--log-format=text',
     `--go=${go}`,
+    `--go-mod-cache=${goModCache}`,
     `--bin-dir=${binDir}`,
     `--rooket-version=${input('rooket-version')}`,
     `--rooket-sha256=${input('rooket-sha256')}`,

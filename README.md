@@ -31,7 +31,9 @@ on `PATH`. GitHub's ubuntu-24.04 image carries one, and the action fetches the
 toolchain the helper's `go.mod` names (`GOTOOLCHAIN=auto`). A job that needs Go
 for its own steps runs [actions/setup-go](https://github.com/actions/setup-go)
 before the action, and the action then builds its helper with that Go. With no
-Go on `PATH`, the action fails and names `actions/setup-go`.
+Go on `PATH`, the action fails and names `actions/setup-go`. The action keeps
+its own module cache under `RUNNER_TEMP`, so in either order the job's module
+cache, which `actions/setup-go` restores, holds nothing of the action's.
 
 ## Usage
 
