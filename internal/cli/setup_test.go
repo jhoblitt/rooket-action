@@ -203,16 +203,20 @@ var _ = Describe("setup", func() {
 		Entry("False", "False"),
 	)
 
-	It("runs go install with --go when --rooket-version is set alone", func(ctx SpecContext) {
-		const goBin = "/opt/hostedtoolcache/go/1.27.0/x64/bin/go"
+	It("runs go install with --go and --go-mod-cache when --rooket-version is set alone", func(ctx SpecContext) {
+		const (
+			goBin      = "/opt/hostedtoolcache/go/1.27.0/x64/bin/go"
+			goModCache = "/home/runner/work/_temp/rooket-action/gomodcache"
+		)
 
-		Expect(setup(ctx, "--bin-dir", binDir, "--go", goBin, "--rooket-version", " main ", "--iscsi", "false")).To(Succeed())
+		Expect(setup(ctx, "--bin-dir", binDir, "--go", goBin, "--go-mod-cache", goModCache,
+			"--rooket-version", " main ", "--iscsi", "false")).To(Succeed())
 
 		Expect(runner.RunCallCount()).To(Equal(1), "Run calls")
 		_, goEnv, name, goArgs := runner.RunArgsForCall(0)
 		Expect(name).To(Equal(goBin))
 		Expect(goArgs).To(Equal([]string{"install", "github.com/jhoblitt/rooket@main"}))
-		Expect(goEnv).To(ContainElements("GOBIN="+binDir, "GOTOOLCHAIN=auto"))
+		Expect(goEnv).To(ContainElements("GOBIN="+binDir, "GOMODCACHE="+goModCache, "GOTOOLCHAIN=auto"))
 		Expect(binDir).To(BeADirectory())
 	})
 
@@ -341,6 +345,8 @@ var _ = Describe("setup", func() {
 		},
 		Entry("--bin-dir missing", "--bin-dir is required", "--rooket-path", "/rooket"),
 		Entry("--go missing when go install would run", "--go is required",
-			"--bin-dir", "/rooket-action/bin", "--rooket-version", "main"),
+			"--bin-dir", "/rooket-action/bin", "--go-mod-cache", "/rooket-action/gomodcache", "--rooket-version", "main"),
+		Entry("--go-mod-cache missing when go install would run", "--go-mod-cache is required",
+			"--bin-dir", "/rooket-action/bin", "--go", "/go", "--rooket-version", "main"),
 	)
 })

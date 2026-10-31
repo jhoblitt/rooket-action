@@ -137,7 +137,9 @@ repository, which follows go-conventions (cobra, Ginkgo, Go 1.27).
    first, as rgw-go will, and the action then uses that Go.
 2. **Build the helper** from the action's own source, which the runner
    downloaded at the commit the consumer pinned. Into the action's directory
-   under `RUNNER_TEMP`.
+   under `RUNNER_TEMP`, with a module cache of its own there. Go makes each
+   module it extracts read-only, so a module the action left in the job's
+   `~/go/pkg/mod` would fail a later `actions/setup-go` cache restore over it.
 3. **Install rooket** into the same directory. *(The owner's decisions.)*
    - **`rooket-path` set:** copy that binary in. The caller's workspace never
      goes on `PATH`. Combining it with `rooket-version` or `rooket-sha256` is
@@ -149,9 +151,10 @@ repository, which follows go-conventions (cobra, Ginkgo, Go 1.27).
      of the pin.
    - **`rooket-version` set alone:** run
      `go install github.com/jhoblitt/rooket@<v>` with `GOBIN` set to that
-     directory. This covers a commit or branch that has no release. The Go
-     checksum database verifies the module, and that database is not the
-     host serving it, so rgw-go's integrity rule holds.
+     directory and the helper build's module cache. This covers a commit or
+     branch that has no release. The Go checksum database verifies the
+     module, and that database is not the host serving it, so rgw-go's
+     integrity rule holds.
    - **`rooket-sha256` set alone:** an input error, because it names no
      archive.
 

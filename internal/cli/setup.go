@@ -36,8 +36,13 @@ rather than the post step, which acts on it.`,
 			if v.GetString("bin-dir") == "" {
 				return errors.New("--bin-dir is required")
 			}
-			if rooketOptions(v).UsesGo() && v.GetString("go") == "" {
-				return errors.New("--go is required when --rooket-version is set without --rooket-sha256, which installs rooket with go install")
+			if !rooketOptions(v).UsesGo() {
+				return nil
+			}
+			for _, name := range []string{"go", "go-mod-cache"} {
+				if v.GetString(name) == "" {
+					return fmt.Errorf("--%s is required when --rooket-version is set without --rooket-sha256, which installs rooket with go install", name)
+				}
 			}
 			return nil
 		},
@@ -47,6 +52,7 @@ rather than the post step, which acts on it.`,
 	}
 	f := cmd.Flags()
 	f.String("go", "", "the go binary, needed when --rooket-version is set without --rooket-sha256")
+	f.String("go-mod-cache", "", "the absolute module cache for go install, needed with --go")
 	f.String("bin-dir", "", "the absolute directory to install into and add to GITHUB_PATH")
 	f.String("rooket-version", "", "the rooket-version input")
 	f.String("rooket-sha256", "", "the rooket-sha256 input")
@@ -60,11 +66,12 @@ rather than the post step, which acts on it.`,
 
 func rooketOptions(v *viper.Viper) rooket.Options {
 	return rooket.Options{
-		Go:      v.GetString("go"),
-		BinDir:  v.GetString("bin-dir"),
-		Version: v.GetString("rooket-version"),
-		SHA256:  v.GetString("rooket-sha256"),
-		Path:    v.GetString("rooket-path"),
+		Go:         v.GetString("go"),
+		GoModCache: v.GetString("go-mod-cache"),
+		BinDir:     v.GetString("bin-dir"),
+		Version:    v.GetString("rooket-version"),
+		SHA256:     v.GetString("rooket-sha256"),
+		Path:       v.GetString("rooket-path"),
 	}
 }
 

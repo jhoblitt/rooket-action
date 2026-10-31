@@ -55,6 +55,11 @@ jobs:
       - name: Run the action
         uses: ./
 
+      # A module the action left in the job's cache would be read-only, and
+      # would fail a later actions/setup-go restore over it.
+      - name: Check the action left the job's module cache alone
+        run: test ! -e "$HOME/go/pkg/mod"
+
       # The Rook release rooket's own e2e proves, bumped by hand.
       - name: Bring up a cluster
         run: rooket up --rook-version v1.21.1 --workers 1 --wait

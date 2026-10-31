@@ -32,6 +32,9 @@ var (
 type Options struct {
 	// Go is the go binary that runs go install. Only UsesGo's case needs it.
 	Go string
+	// GoModCache is the absolute module cache go install uses. Only UsesGo's
+	// case needs it.
+	GoModCache string
 	// BinDir is the existing, absolute directory rooket is installed into.
 	BinDir string
 	// Version is the rooket-version input: with SHA256, a release to
@@ -126,7 +129,7 @@ func (o Options) source() (source, error) {
 //     SHA256 64 hex digits.
 //   - Version alone: runs o.Go install github.com/jhoblitt/rooket@Version,
 //     with goEnv over whatever the parent sets, so that the checksum
-//     database verifies the module.
+//     database verifies the module and o.GoModCache holds it.
 //
 // Path with Version or SHA256, and SHA256 alone, are errors. An input error
 // names the input at fault, and Install returns it before touching
@@ -145,7 +148,7 @@ func Install(ctx context.Context, r Runner, c *http.Client, retry tools.Retry, o
 		}
 	case goInstall:
 		slog.InfoContext(ctx, "installing rooket with go install", slog.String("version", src.version))
-		if err := r.Run(ctx, goEnv(o.BinDir), o.Go, "install", module+"@"+src.version); err != nil {
+		if err := r.Run(ctx, goEnv(o.BinDir, o.GoModCache), o.Go, "install", module+"@"+src.version); err != nil {
 			return "", fmt.Errorf("installing rooket: %w", err)
 		}
 	case download:
@@ -157,7 +160,11 @@ func Install(ctx context.Context, r Runner, c *http.Client, retry tools.Retry, o
 	return dst, nil
 }
 
-// goEnv is go install's environment over the parent's, with GOBIN=binDir.
+// goEnv is go install's environment over the parent's, with GOBIN=binDir
+// and GOMODCACHE=modCache. A module cache of its own keeps rooket's modules
+// out of the consumer's: go makes each module it extracts read-only, so a
+// later actions/setup-go step fails to restore a cache holding the same
+// module over it.
 // GOTOOLCHAIN=auto lets a Go older than rooket's go.mod fetch the toolchain
 // it names. GOWORK=off and the emptied GOFLAGS, GOOS and GOARCH keep a
 // consumer's workspace, flags (-mod=vendor, say) and cross-compilation target
@@ -166,9 +173,9 @@ func Install(ctx context.Context, r Runner, c *http.Client, retry tools.Retry, o
 // which is what verifies it. go reads a variable set to "" as unset and
 // falls back to the go env -w file, so GOENV=off is what makes each emptied
 // variable stay empty.
-func goEnv(binDir string) []string {
+func goEnv(binDir, modCache string) []string {
 	return []string{
-		"GOBIN=" + binDir, "GOTOOLCHAIN=auto", "GOWORK=off", "GOFLAGS=", "GOOS=", "GOARCH=",
+		"GOBIN=" + binDir, "GOMODCACHE=" + modCache, "GOTOOLCHAIN=auto", "GOWORK=off", "GOFLAGS=", "GOOS=", "GOARCH=",
 		"GOENV=off", "GOSUMDB=sum.golang.org", "GONOSUMDB=", "GOPRIVATE=",
 	}
 }
