@@ -9,6 +9,11 @@ updates:
     groups:
       go-dependencies:
         patterns: ["*"]
+    # Consumers build the helper from these modules, so a bump releases as a
+    # patch, the way a rooket pin bump does.
+    commit-message:
+      prefix: fix
+      include: scope
   # The GitHub Actions entry, from github-conventions (references/workflows.md,
   # Dependabot), which owns this file.
   - package-ecosystem: github-actions

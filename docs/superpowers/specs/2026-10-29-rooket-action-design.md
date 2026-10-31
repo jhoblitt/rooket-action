@@ -100,9 +100,10 @@ semantic-release cuts the action's versions from conventional commits on
 - `feat` cuts a minor release, `fix` and `perf` a patch, and a breaking change
   a major.
 - A bump of the pinned rooket is committed as `fix(deps): …` so that it
-  releases. Dependabot's own `build(deps)` and `ci` commits do not release.
-  *(My call: a bump of a workflow pin or of semantic-release itself changes
-  nothing a consumer runs.)*
+  releases. So is Dependabot's bump of the helper's Go modules, because
+  consumers build the helper from them. *(The owner's decision.)* Its other
+  bumps, of workflow pins and of semantic-release, do not release. *(My
+  call: those change nothing a consumer runs.)*
 - It releases only from a push to `main` whose CI passed, and publishes a git
   tag and a GitHub release with generated notes. Nothing is published to npm.
 - The release job needs `contents: write` only. Features of the GitHub plugin
