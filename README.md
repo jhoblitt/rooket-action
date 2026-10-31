@@ -52,7 +52,7 @@ jobs:
       ROOKET_NAME: e2e
     steps:
       - uses: jhoblitt/rooket-action@<full-commit-sha> # v1.0.0
-      - run: rooket up --rook-version v1.20.7 --workers 1 --wait
+      - run: rooket up --rook-version v1.21.1 --workers 1 --wait
       - run: rooket k -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s
       - if: always()
         run: rooket down --delete-disks
